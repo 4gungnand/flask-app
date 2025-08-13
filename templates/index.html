@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %} Index page {% endblock %}
+{% block content %} 
+    <p>My list contains the following numbers:</p>
+    <ul>
+        {% for item in mylist %}
+                <li {% if item == 35 %} style="font-weight: bold;" {% endif %}>{{ item }}</li>
+        {% endfor %}
+{% endblock %}

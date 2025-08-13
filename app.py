@@ -1,10 +1,33 @@
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, render_template, request, jsonify, make_response
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='templates')
 
 @app.route('/')
 def index():
-    return "<h1>Hello, World!</h1>"
+    mylist = [10, 35, 56, 72, 91]
+    return render_template('index.html', mylist=mylist)
+
+
+@app.route('/other')
+def other():
+    message = 'Sample text'
+    return render_template('other.html', message=message)
+
+
+@app.template_filter('reverse')
+def reverse(text):
+    return text[::-1]
+
+
+@app.template_filter('repeat')
+def repeat(text, times=2):
+    return text * times
+
+
+@app.template_filter('alternate')
+def alternate(s):
+    return ''.join([c.upper() if i % 2 == 0 else c.lower() for i, c in enumerate(s)])
+
 
 @app.route('/hello', methods=['POST', 'GET', 'PUT', 'DELETE'])
 def hello_world():
@@ -18,9 +41,11 @@ def hello_world():
 def hello(name):
     return f"Hello {name}"
 
+
 @app.route('/add/<int:number1>/<int:number2>')
 def add(number1, number2):
     return f"{number1} + {number2} = {number1 + number2}"
+
 
 @app.route('/handle_url_params')
 def handle_params():
