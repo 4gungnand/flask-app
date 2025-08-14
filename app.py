@@ -1,60 +1,85 @@
-from flask import Flask, render_template, request, jsonify, make_response
+from dotenv import load_dotenv
+from flask import Flask, render_template, request, Response
+import pandas as pd 
+import requests
+import os
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import create_engine
+from datetime import datetime
+
+load_dotenv()
+
+API_KEY = os.environ.get('API_KEY')
 
 app = Flask(__name__, template_folder='templates')
 
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:admin@localhost/forecasts'
+engine = create_engine(app.config['SQLALCHEMY_DATABASE_URI'])
+
+db=SQLAlchemy(app)
+
+with app.app_context():
+    db.create_all()
+
 @app.route('/')
 def index():
-    mylist = [10, 35, 56, 72, 91]
-    return render_template('index.html', mylist=mylist)
+    with engine.connect() as conn, conn.begin():
+        data = pd.read_sql_table("table_name", conn)
 
+        data = data.to_html(index=False, header=False, justify='center', classes='table table-striped')
+    return render_template('index.html', data=data)
 
-@app.route('/other')
-def other():
-    message = 'Sample text'
-    return render_template('other.html', message=message)
+@app.route('/post_data', methods=['POST'])
+def post_data():
+        curveid = request.form['curveid']
 
+        if curveid.isnumeric():
+            base_url = 'https://strial1.rdms.refinitiv.com/api'
+            CurveID = str(curveid)
+            headers = { 'Authorization' : API_KEY }
+            ScenarioID = 0
 
-@app.template_filter('reverse')
-def reverse(text):
-    return text[::-1]
+            metadata_url = f"{base_url}/v1/Metadata/{CurveID}"
+            print('requesting curve ' + CurveID + ' data..')
+            meta_response = requests.get(metadata_url, headers=headers)
 
+            print("== Metadata Curve ==")
+            if meta_response.status_code == 200:
+                print("Metadata recieved...")
+            else:
+                print(f"failed to get metadata: {meta_response.status_code}")
+                print(meta_response.text)
 
-@app.template_filter('repeat')
-def repeat(text, times=2):
-    return text * times
+            values = meta_response.json()
 
+            tags_list = values['tags']
+            curve_dict = {tag['name']: tag['value'] for tag in tags_list}
+            curve_dict['curveID'] = values['curveID']
 
-@app.template_filter('alternate')
-def alternate(s):
-    return ''.join([c.upper() if i % 2 == 0 else c.lower() for i, c in enumerate(s)])
+            df = pd.DataFrame.from_dict(curve_dict, orient='index', columns=['Value'])
 
+            ForecastDate = df.loc['CreateDate', 'Value'] # for a forecast type, its the same as CreateDate
 
-@app.route('/hello', methods=['POST', 'GET', 'PUT', 'DELETE'])
-def hello_world():
-    response = make_response('Hello, World!')
-    response.status_code = 202
-    response.headers['Content-Type'] = 'text/plain'
-    return response
+            metadata_url = f"{base_url}/v1/CurveValues/Forecast/{CurveID}/{ScenarioID}/{ForecastDate}"
 
+            print('requesting curve ' + CurveID + ' data..')
+            meta_response = requests.get(metadata_url, headers=headers)
 
-@app.route('/greet/<name>')
-def hello(name):
-    return f"Hello {name}"
+            print("== Curve Values - Forecast ==")
+            if meta_response.status_code == 200:
+                print("Curve values received successfully...")
+            else:
+                print(f"failed to get curve values: {meta_response.status_code}")
+                print(meta_response.text)
 
+            df_date = pd.DataFrame.from_dict(meta_response.json())
+            df_date['valueDate'] = pd.to_datetime(df_date['valueDate'])
 
-@app.route('/add/<int:number1>/<int:number2>')
-def add(number1, number2):
-    return f"{number1} + {number2} = {number1 + number2}"
+            # Store to DB
+            df_date.to_sql('table_name', engine)
 
-
-@app.route('/handle_url_params')
-def handle_params():
-    if 'greeting' in request.args.keys() and 'name' in request.args.keys():
-        greeting = request.args.get('greeting', '')
-        name = request.args.get('name', '')
-        return f"{greeting}, {name}"
-    else:
-        return "Missing 'greeting' or 'name' parameter", 400
+        return "Successfully stored data to db"
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', debug=True, port=5555)
